@@ -85,6 +85,8 @@ FROM
   LEFT JOIN "person" "AssetFaceEntity__AssetFaceEntity_person" ON "AssetFaceEntity__AssetFaceEntity_person"."id" = "AssetFaceEntity"."personId"
 WHERE
   (("AssetFaceEntity"."assetId" = $1))
+ORDER BY
+  "AssetFaceEntity"."boundingBoxX1" ASC
 
 -- PersonRepository.getFaceById
 SELECT DISTINCT
@@ -152,8 +154,8 @@ FROM
       "AssetFaceEntity__AssetFaceEntity_asset"."deviceId" AS "AssetFaceEntity__AssetFaceEntity_asset_deviceId",
       "AssetFaceEntity__AssetFaceEntity_asset"."type" AS "AssetFaceEntity__AssetFaceEntity_asset_type",
       "AssetFaceEntity__AssetFaceEntity_asset"."originalPath" AS "AssetFaceEntity__AssetFaceEntity_asset_originalPath",
-      "AssetFaceEntity__AssetFaceEntity_asset"."resizePath" AS "AssetFaceEntity__AssetFaceEntity_asset_resizePath",
-      "AssetFaceEntity__AssetFaceEntity_asset"."webpPath" AS "AssetFaceEntity__AssetFaceEntity_asset_webpPath",
+      "AssetFaceEntity__AssetFaceEntity_asset"."previewPath" AS "AssetFaceEntity__AssetFaceEntity_asset_previewPath",
+      "AssetFaceEntity__AssetFaceEntity_asset"."thumbnailPath" AS "AssetFaceEntity__AssetFaceEntity_asset_thumbnailPath",
       "AssetFaceEntity__AssetFaceEntity_asset"."thumbhash" AS "AssetFaceEntity__AssetFaceEntity_asset_thumbhash",
       "AssetFaceEntity__AssetFaceEntity_asset"."encodedVideoPath" AS "AssetFaceEntity__AssetFaceEntity_asset_encodedVideoPath",
       "AssetFaceEntity__AssetFaceEntity_asset"."createdAt" AS "AssetFaceEntity__AssetFaceEntity_asset_createdAt",
@@ -165,7 +167,6 @@ FROM
       "AssetFaceEntity__AssetFaceEntity_asset"."isFavorite" AS "AssetFaceEntity__AssetFaceEntity_asset_isFavorite",
       "AssetFaceEntity__AssetFaceEntity_asset"."isArchived" AS "AssetFaceEntity__AssetFaceEntity_asset_isArchived",
       "AssetFaceEntity__AssetFaceEntity_asset"."isExternal" AS "AssetFaceEntity__AssetFaceEntity_asset_isExternal",
-      "AssetFaceEntity__AssetFaceEntity_asset"."isReadOnly" AS "AssetFaceEntity__AssetFaceEntity_asset_isReadOnly",
       "AssetFaceEntity__AssetFaceEntity_asset"."isOffline" AS "AssetFaceEntity__AssetFaceEntity_asset_isOffline",
       "AssetFaceEntity__AssetFaceEntity_asset"."checksum" AS "AssetFaceEntity__AssetFaceEntity_asset_checksum",
       "AssetFaceEntity__AssetFaceEntity_asset"."duration" AS "AssetFaceEntity__AssetFaceEntity_asset_duration",
@@ -250,8 +251,8 @@ FROM
       "AssetEntity"."deviceId" AS "AssetEntity_deviceId",
       "AssetEntity"."type" AS "AssetEntity_type",
       "AssetEntity"."originalPath" AS "AssetEntity_originalPath",
-      "AssetEntity"."resizePath" AS "AssetEntity_resizePath",
-      "AssetEntity"."webpPath" AS "AssetEntity_webpPath",
+      "AssetEntity"."previewPath" AS "AssetEntity_previewPath",
+      "AssetEntity"."thumbnailPath" AS "AssetEntity_thumbnailPath",
       "AssetEntity"."thumbhash" AS "AssetEntity_thumbhash",
       "AssetEntity"."encodedVideoPath" AS "AssetEntity_encodedVideoPath",
       "AssetEntity"."createdAt" AS "AssetEntity_createdAt",
@@ -263,7 +264,6 @@ FROM
       "AssetEntity"."isFavorite" AS "AssetEntity_isFavorite",
       "AssetEntity"."isArchived" AS "AssetEntity_isArchived",
       "AssetEntity"."isExternal" AS "AssetEntity_isExternal",
-      "AssetEntity"."isReadOnly" AS "AssetEntity_isReadOnly",
       "AssetEntity"."isOffline" AS "AssetEntity_isOffline",
       "AssetEntity"."checksum" AS "AssetEntity_checksum",
       "AssetEntity"."duration" AS "AssetEntity_duration",
@@ -380,8 +380,8 @@ SELECT
   "AssetFaceEntity__AssetFaceEntity_asset"."deviceId" AS "AssetFaceEntity__AssetFaceEntity_asset_deviceId",
   "AssetFaceEntity__AssetFaceEntity_asset"."type" AS "AssetFaceEntity__AssetFaceEntity_asset_type",
   "AssetFaceEntity__AssetFaceEntity_asset"."originalPath" AS "AssetFaceEntity__AssetFaceEntity_asset_originalPath",
-  "AssetFaceEntity__AssetFaceEntity_asset"."resizePath" AS "AssetFaceEntity__AssetFaceEntity_asset_resizePath",
-  "AssetFaceEntity__AssetFaceEntity_asset"."webpPath" AS "AssetFaceEntity__AssetFaceEntity_asset_webpPath",
+  "AssetFaceEntity__AssetFaceEntity_asset"."previewPath" AS "AssetFaceEntity__AssetFaceEntity_asset_previewPath",
+  "AssetFaceEntity__AssetFaceEntity_asset"."thumbnailPath" AS "AssetFaceEntity__AssetFaceEntity_asset_thumbnailPath",
   "AssetFaceEntity__AssetFaceEntity_asset"."thumbhash" AS "AssetFaceEntity__AssetFaceEntity_asset_thumbhash",
   "AssetFaceEntity__AssetFaceEntity_asset"."encodedVideoPath" AS "AssetFaceEntity__AssetFaceEntity_asset_encodedVideoPath",
   "AssetFaceEntity__AssetFaceEntity_asset"."createdAt" AS "AssetFaceEntity__AssetFaceEntity_asset_createdAt",
@@ -393,7 +393,6 @@ SELECT
   "AssetFaceEntity__AssetFaceEntity_asset"."isFavorite" AS "AssetFaceEntity__AssetFaceEntity_asset_isFavorite",
   "AssetFaceEntity__AssetFaceEntity_asset"."isArchived" AS "AssetFaceEntity__AssetFaceEntity_asset_isArchived",
   "AssetFaceEntity__AssetFaceEntity_asset"."isExternal" AS "AssetFaceEntity__AssetFaceEntity_asset_isExternal",
-  "AssetFaceEntity__AssetFaceEntity_asset"."isReadOnly" AS "AssetFaceEntity__AssetFaceEntity_asset_isReadOnly",
   "AssetFaceEntity__AssetFaceEntity_asset"."isOffline" AS "AssetFaceEntity__AssetFaceEntity_asset_isOffline",
   "AssetFaceEntity__AssetFaceEntity_asset"."checksum" AS "AssetFaceEntity__AssetFaceEntity_asset_checksum",
   "AssetFaceEntity__AssetFaceEntity_asset"."duration" AS "AssetFaceEntity__AssetFaceEntity_asset_duration",

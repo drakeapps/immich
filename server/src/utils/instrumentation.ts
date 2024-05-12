@@ -1,13 +1,10 @@
-import { Histogram, MetricOptions, ValueType, metrics } from '@opentelemetry/api';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { IORedisInstrumentation } from '@opentelemetry/instrumentation-ioredis';
 import { NestInstrumentation } from '@opentelemetry/instrumentation-nestjs-core';
 import { PgInstrumentation } from '@opentelemetry/instrumentation-pg';
-import { Resource } from '@opentelemetry/resources';
-import { ExplicitBucketHistogramAggregation, View } from '@opentelemetry/sdk-metrics';
-import { NodeSDK } from '@opentelemetry/sdk-node';
+import { NodeSDK, contextBase, metrics, resources } from '@opentelemetry/sdk-node';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 import { snakeCase, startCase } from 'lodash';
 import { OpenTelemetryModuleOptions } from 'nestjs-otel/lib/interfaces';
@@ -17,17 +14,21 @@ import { excludePaths, serverVersion } from 'src/constants';
 import { DecorateAll } from 'src/decorators';
 
 let metricsEnabled = process.env.IMMICH_METRICS === 'true';
-const hostMetrics =
+export const hostMetrics =
   process.env.IMMICH_HOST_METRICS == null ? metricsEnabled : process.env.IMMICH_HOST_METRICS === 'true';
-const apiMetrics = process.env.IMMICH_API_METRICS == null ? metricsEnabled : process.env.IMMICH_API_METRICS === 'true';
-const repoMetrics = process.env.IMMICH_IO_METRICS == null ? metricsEnabled : process.env.IMMICH_IO_METRICS === 'true';
+export const apiMetrics =
+  process.env.IMMICH_API_METRICS == null ? metricsEnabled : process.env.IMMICH_API_METRICS === 'true';
+export const repoMetrics =
+  process.env.IMMICH_IO_METRICS == null ? metricsEnabled : process.env.IMMICH_IO_METRICS === 'true';
+export const jobMetrics =
+  process.env.IMMICH_JOB_METRICS == null ? metricsEnabled : process.env.IMMICH_JOB_METRICS === 'true';
 
-metricsEnabled ||= hostMetrics || apiMetrics || repoMetrics;
+metricsEnabled ||= hostMetrics || apiMetrics || repoMetrics || jobMetrics;
 if (!metricsEnabled && process.env.OTEL_SDK_DISABLED === undefined) {
   process.env.OTEL_SDK_DISABLED = 'true';
 }
 
-const aggregation = new ExplicitBucketHistogramAggregation(
+const aggregation = new metrics.ExplicitBucketHistogramAggregation(
   [0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10_000],
   true,
 );
@@ -35,7 +36,7 @@ const aggregation = new ExplicitBucketHistogramAggregation(
 const metricsPort = Number.parseInt(process.env.IMMICH_METRICS_PORT ?? '8081');
 
 export const otelSDK = new NodeSDK({
-  resource: new Resource({
+  resource: new resources.Resource({
     [SemanticResourceAttributes.SERVICE_NAME]: `immich`,
     [SemanticResourceAttributes.SERVICE_VERSION]: serverVersion.toString(),
   }),
@@ -47,7 +48,7 @@ export const otelSDK = new NodeSDK({
     new NestInstrumentation(),
     new PgInstrumentation(),
   ],
-  views: [new View({ aggregation, instrumentName: '*', instrumentUnit: 'ms' })],
+  views: [new metrics.View({ aggregation, instrumentName: '*', instrumentUnit: 'ms' })],
 });
 
 export const otelConfig: OpenTelemetryModuleOptions = {
@@ -60,7 +61,11 @@ export const otelConfig: OpenTelemetryModuleOptions = {
   },
 };
 
-function ExecutionTimeHistogram({ description, unit = 'ms', valueType = ValueType.DOUBLE }: MetricOptions = {}) {
+function ExecutionTimeHistogram({
+  description,
+  unit = 'ms',
+  valueType = contextBase.ValueType.DOUBLE,
+}: contextBase.MetricOptions = {}) {
   return (target: any, propertyKey: string | symbol, descriptor: PropertyDescriptor) => {
     if (!repoMetrics || process.env.OTEL_SDK_DISABLED) {
       return;
@@ -75,7 +80,7 @@ function ExecutionTimeHistogram({ description, unit = 'ms', valueType = ValueTyp
       description ??
       `The elapsed time in ${unit} for the ${startCase(className)} to ${startCase(propertyName).toLowerCase()}`;
 
-    let histogram: Histogram | undefined;
+    let histogram: contextBase.Histogram | undefined;
 
     descriptor.value = function (...args: any[]) {
       const start = performance.now();
@@ -85,7 +90,7 @@ function ExecutionTimeHistogram({ description, unit = 'ms', valueType = ValueTyp
         .then(() => {
           const end = performance.now();
           if (!histogram) {
-            histogram = metrics
+            histogram = contextBase.metrics
               .getMeter('immich')
               .createHistogram(metricName, { description: metricDescription, unit, valueType });
           }

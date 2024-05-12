@@ -58,7 +58,7 @@ export function searchAssetBuilder(
     builder.andWhere(`${builder.alias}.ownerId IN (:...userIds)`, { userIds: options.userIds });
   }
 
-  const path = _.pick(options, ['encodedVideoPath', 'originalPath', 'resizePath', 'webpPath']);
+  const path = _.pick(options, ['encodedVideoPath', 'originalPath', 'previewPath', 'thumbnailPath']);
   builder.andWhere(_.omitBy(path, _.isUndefined));
 
   if (options.originalFileName) {
@@ -67,7 +67,7 @@ export function searchAssetBuilder(
     });
   }
 
-  const status = _.pick(options, ['isExternal', 'isFavorite', 'isOffline', 'isReadOnly', 'isVisible', 'type']);
+  const status = _.pick(options, ['isFavorite', 'isOffline', 'isVisible', 'type']);
   const {
     isArchived,
     isEncoded,

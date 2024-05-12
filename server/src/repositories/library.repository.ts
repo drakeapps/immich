@@ -5,7 +5,7 @@ import { LibraryStatsResponseDto } from 'src/dtos/library.dto';
 import { LibraryEntity, LibraryType } from 'src/entities/library.entity';
 import { ILibraryRepository } from 'src/interfaces/library.interface';
 import { Instrumentation } from 'src/utils/instrumentation';
-import { IsNull, Not } from 'typeorm';
+import { EntityNotFoundError, IsNull, Not } from 'typeorm';
 import { Repository } from 'typeorm/repository/Repository.js';
 
 @Instrumentation()
@@ -139,6 +139,10 @@ export class LibraryRepository implements ILibraryRepository {
       .where('libraries.id = :id', { id })
       .getRawOne();
 
+    if (!stats) {
+      throw new EntityNotFoundError(LibraryEntity, { where: { id } });
+    }
+
     return {
       photos: Number(stats.photos),
       videos: Number(stats.videos),
@@ -169,18 +173,18 @@ export class LibraryRepository implements ILibraryRepository {
 
   @GenerateSql({ params: [DummyValue.UUID] })
   async getAssetIds(libraryId: string, withDeleted = false): Promise<string[]> {
-    let query = this.repository
+    const builder = this.repository
       .createQueryBuilder('library')
       .innerJoinAndSelect('library.assets', 'assets')
       .where('library.id = :id', { id: libraryId })
       .select('assets.id');
 
     if (withDeleted) {
-      query = query.withDeleted();
+      builder.withDeleted();
     }
 
     // Return all asset paths for a given library
-    const rawResults = await query.getRawMany();
+    const rawResults = await builder.getRawMany();
 
     const results: string[] = [];
 

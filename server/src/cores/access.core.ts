@@ -1,5 +1,6 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthDto } from 'src/dtos/auth.dto';
+import { AlbumUserRole } from 'src/entities/album-user.entity';
 import { SharedLinkEntity } from 'src/entities/shared-link.entity';
 import { IAccessRepository } from 'src/interfaces/access.interface';
 import { setDifference, setIsEqual, setUnion } from 'src/utils/set';
@@ -22,6 +23,7 @@ export enum Permission {
   ALBUM_READ = 'album.read',
   ALBUM_UPDATE = 'album.update',
   ALBUM_DELETE = 'album.delete',
+  ALBUM_ADD_ASSET = 'album.addAsset',
   ALBUM_REMOVE_ASSET = 'album.removeAsset',
   ALBUM_SHARE = 'album.share',
   ALBUM_DOWNLOAD = 'album.download',
@@ -32,6 +34,10 @@ export enum Permission {
 
   TIMELINE_READ = 'timeline.read',
   TIMELINE_DOWNLOAD = 'timeline.download',
+
+  MEMORY_READ = 'memory.read',
+  MEMORY_WRITE = 'memory.write',
+  MEMORY_DELETE = 'memory.delete',
 
   PERSON_READ = 'person.read',
   PERSON_WRITE = 'person.write',
@@ -84,7 +90,7 @@ export class AccessCore {
    *
    * @returns Set<string>
    */
-  async checkAccess(auth: AuthDto, permission: Permission, ids: Set<string> | string[]) {
+  async checkAccess(auth: AuthDto, permission: Permission, ids: Set<string> | string[]): Promise<Set<string>> {
     const idSet = Array.isArray(ids) ? new Set(ids) : ids;
     if (idSet.size === 0) {
       return new Set();
@@ -97,7 +103,11 @@ export class AccessCore {
     return this.checkAccessOther(auth, permission, idSet);
   }
 
-  private async checkAccessSharedLink(sharedLink: SharedLinkEntity, permission: Permission, ids: Set<string>) {
+  private async checkAccessSharedLink(
+    sharedLink: SharedLinkEntity,
+    permission: Permission,
+    ids: Set<string>,
+  ): Promise<Set<string>> {
     const sharedLinkId = sharedLink.id;
 
     switch (permission) {
@@ -134,13 +144,19 @@ export class AccessCore {
           : new Set();
       }
 
+      case Permission.ALBUM_ADD_ASSET: {
+        return sharedLink.allowUpload
+          ? await this.repository.album.checkSharedLinkAccess(sharedLinkId, ids)
+          : new Set();
+      }
+
       default: {
         return new Set();
       }
     }
   }
 
-  private async checkAccessOther(auth: AuthDto, permission: Permission, ids: Set<string>) {
+  private async checkAccessOther(auth: AuthDto, permission: Permission, ids: Set<string>): Promise<Set<string>> {
     switch (permission) {
       // uses album id
       case Permission.ACTIVITY_CREATE: {
@@ -207,7 +223,21 @@ export class AccessCore {
 
       case Permission.ALBUM_READ: {
         const isOwner = await this.repository.album.checkOwnerAccess(auth.user.id, ids);
-        const isShared = await this.repository.album.checkSharedAlbumAccess(auth.user.id, setDifference(ids, isOwner));
+        const isShared = await this.repository.album.checkSharedAlbumAccess(
+          auth.user.id,
+          setDifference(ids, isOwner),
+          AlbumUserRole.VIEWER,
+        );
+        return setUnion(isOwner, isShared);
+      }
+
+      case Permission.ALBUM_ADD_ASSET: {
+        const isOwner = await this.repository.album.checkOwnerAccess(auth.user.id, ids);
+        const isShared = await this.repository.album.checkSharedAlbumAccess(
+          auth.user.id,
+          setDifference(ids, isOwner),
+          AlbumUserRole.EDITOR,
+        );
         return setUnion(isOwner, isShared);
       }
 
@@ -225,12 +255,22 @@ export class AccessCore {
 
       case Permission.ALBUM_DOWNLOAD: {
         const isOwner = await this.repository.album.checkOwnerAccess(auth.user.id, ids);
-        const isShared = await this.repository.album.checkSharedAlbumAccess(auth.user.id, setDifference(ids, isOwner));
+        const isShared = await this.repository.album.checkSharedAlbumAccess(
+          auth.user.id,
+          setDifference(ids, isOwner),
+          AlbumUserRole.VIEWER,
+        );
         return setUnion(isOwner, isShared);
       }
 
       case Permission.ALBUM_REMOVE_ASSET: {
-        return await this.repository.album.checkOwnerAccess(auth.user.id, ids);
+        const isOwner = await this.repository.album.checkOwnerAccess(auth.user.id, ids);
+        const isShared = await this.repository.album.checkSharedAlbumAccess(
+          auth.user.id,
+          setDifference(ids, isOwner),
+          AlbumUserRole.EDITOR,
+        );
+        return setUnion(isOwner, isShared);
       }
 
       case Permission.ASSET_UPLOAD: {
@@ -253,6 +293,18 @@ export class AccessCore {
 
       case Permission.TIMELINE_DOWNLOAD: {
         return ids.has(auth.user.id) ? new Set([auth.user.id]) : new Set();
+      }
+
+      case Permission.MEMORY_READ: {
+        return this.repository.memory.checkOwnerAccess(auth.user.id, ids);
+      }
+
+      case Permission.MEMORY_WRITE: {
+        return this.repository.memory.checkOwnerAccess(auth.user.id, ids);
+      }
+
+      case Permission.MEMORY_DELETE: {
+        return this.repository.memory.checkOwnerAccess(auth.user.id, ids);
       }
 
       case Permission.PERSON_READ: {

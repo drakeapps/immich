@@ -18,9 +18,11 @@
   import Scrollbar from '../shared-components/scrollbar/scrollbar.svelte';
   import ShowShortcuts from '../shared-components/show-shortcuts.svelte';
   import AssetDateGroup from './asset-date-group.svelte';
+  import { stackAssets } from '$lib/utils/asset-utils';
   import DeleteAssetDialog from './delete-asset-dialog.svelte';
   import { handlePromiseError } from '$lib/utils';
   import { selectAllAssets } from '$lib/utils/asset-utils';
+  import { navigate } from '$lib/utils/navigation';
 
   export let isSelectionMode = false;
   export let singleSelect = false;
@@ -45,7 +47,11 @@
 
   $: timelineY = element?.scrollTop || 0;
   $: isEmpty = $assetStore.initialized && $assetStore.buckets.length === 0;
-  $: idsSelectedAssets = [...$selectedAssets].filter((a) => !a.isExternal).map((a) => a.id);
+  $: idsSelectedAssets = [...$selectedAssets].map(({ id }) => id);
+
+  $: {
+    void assetStore.updateViewport(viewport);
+  }
 
   const dispatch = createEventDispatcher<{ select: AssetResponseDto; escape: void }>();
 
@@ -70,11 +76,13 @@
   };
 
   const onDelete = () => {
-    if (!isTrashEnabled && $showDeleteModal) {
+    const hasTrashedAsset = Array.from($selectedAssets).some((asset) => asset.isTrashed);
+
+    if ($showDeleteModal && (!isTrashEnabled || hasTrashedAsset)) {
       isShowDeleteConfirmation = true;
       return;
     }
-    handlePromiseError(trashOrDelete(false));
+    handlePromiseError(trashOrDelete(hasTrashedAsset));
   };
 
   const onForceDelete = () => {
@@ -83,6 +91,14 @@
       return;
     }
     handlePromiseError(trashOrDelete(true));
+  };
+
+  const onStackAssets = async () => {
+    const ids = await stackAssets(Array.from($selectedAssets));
+    if (ids) {
+      assetStore.removeAssets(ids);
+      dispatch('escape');
+    }
   };
 
   $: shortcutList = (() => {
@@ -95,6 +111,8 @@
       { shortcut: { key: '?', shift: true }, onShortcut: () => (showShortcuts = !showShortcuts) },
       { shortcut: { key: '/' }, onShortcut: () => goto(AppRoute.EXPLORE) },
       { shortcut: { key: 'A', ctrl: true }, onShortcut: () => selectAllAssets(assetStore, assetInteractionStore) },
+      { shortcut: { key: 'PageUp' }, onShortcut: () => (element.scrollTop = 0) },
+      { shortcut: { key: 'PageDown' }, onShortcut: () => (element.scrollTop = element.scrollHeight) },
     ];
 
     if ($isMultiSelectState) {
@@ -102,6 +120,7 @@
         { shortcut: { key: 'Delete' }, onShortcut: onDelete },
         { shortcut: { key: 'Delete', shift: true }, onShortcut: onForceDelete },
         { shortcut: { key: 'D', ctrl: true }, onShortcut: () => deselectAllAssets() },
+        { shortcut: { key: 's' }, onShortcut: () => onStackAssets() },
       );
     }
 
@@ -128,26 +147,24 @@
   }
 
   const handlePrevious = async () => {
-    const previousAsset = await assetStore.getPreviousAssetId($viewingAsset.id);
+    const previousAsset = await assetStore.getPreviousAsset($viewingAsset);
 
     if (previousAsset) {
-      const preloadId = await assetStore.getPreviousAssetId(previousAsset);
-      preloadId
-        ? await assetViewingStore.setAssetId(previousAsset, [preloadId])
-        : await assetViewingStore.setAssetId(previousAsset);
+      const preloadAsset = await assetStore.getPreviousAsset(previousAsset);
+      assetViewingStore.setAsset(previousAsset, preloadAsset ? [preloadAsset] : []);
+      await navigate({ targetRoute: 'current', assetId: previousAsset.id });
     }
 
     return !!previousAsset;
   };
 
   const handleNext = async () => {
-    const nextAsset = await assetStore.getNextAssetId($viewingAsset.id);
+    const nextAsset = await assetStore.getNextAsset($viewingAsset);
 
     if (nextAsset) {
-      const preloadId = await assetStore.getNextAssetId(nextAsset);
-      preloadId
-        ? await assetViewingStore.setAssetId(nextAsset, [preloadId])
-        : await assetViewingStore.setAssetId(nextAsset);
+      const preloadAsset = await assetStore.getNextAsset(nextAsset);
+      assetViewingStore.setAsset(nextAsset, preloadAsset ? [preloadAsset] : []);
+      await navigate({ targetRoute: 'current', assetId: nextAsset.id });
     }
 
     return !!nextAsset;
@@ -159,6 +176,7 @@
     switch (action) {
       case removeAction:
       case AssetAction.TRASH:
+      case AssetAction.RESTORE:
       case AssetAction.DELETE: {
         // find the next asset to show or close the viewer
         (await handleNext()) || (await handlePrevious()) || handleClose();
@@ -451,8 +469,8 @@
 
 <Portal target="body">
   {#if $showAssetViewer}
-    {#await import('../asset-viewer/asset-viewer.svelte') then AssetViewer}
-      <AssetViewer.default
+    {#await import('../asset-viewer/asset-viewer.svelte') then { default: AssetViewer }}
+      <AssetViewer
         {withStacked}
         {assetStore}
         asset={$viewingAsset}

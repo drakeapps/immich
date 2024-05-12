@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -22,6 +23,7 @@ import {
   AudioCodec,
   CQMode,
   Colorspace,
+  ImageFormat,
   LogLevel,
   SystemConfig,
   ToneMapping,
@@ -42,6 +44,7 @@ class CronValidator implements ValidatorConstraintInterface {
 const isLibraryScanEnabled = (config: SystemConfigLibraryScanDto) => config.enabled;
 const isOAuthEnabled = (config: SystemConfigOAuthDto) => config.enabled;
 const isOAuthOverrideEnabled = (config: SystemConfigOAuthDto) => config.mobileOverrideEnabled;
+const isEmailNotificationEnabled = (config: SystemConfigSmtpDto) => config.enabled;
 
 export class SystemConfigFFmpegDto {
   @IsInt()
@@ -201,6 +204,12 @@ class SystemConfigJobDto implements Record<ConcurrentQueueName, JobSettingsDto> 
   @IsObject()
   @Type(() => JobSettingsDto)
   [QueueName.LIBRARY]!: JobSettingsDto;
+
+  @ApiProperty({ type: JobSettingsDto })
+  @ValidateNested()
+  @IsObject()
+  @Type(() => JobSettingsDto)
+  [QueueName.NOTIFICATION]!: JobSettingsDto;
 }
 
 class SystemConfigLibraryScanDto {
@@ -357,6 +366,53 @@ class SystemConfigServerDto {
   loginPageMessage!: string;
 }
 
+class SystemConfigSmtpTransportDto {
+  @IsBoolean()
+  ignoreCert!: boolean;
+
+  @IsNotEmpty()
+  @IsString()
+  host!: string;
+
+  @IsNumber()
+  @Min(0)
+  @Max(65_535)
+  port!: number;
+
+  @IsString()
+  username!: string;
+
+  @IsString()
+  password!: string;
+}
+
+class SystemConfigSmtpDto {
+  @IsBoolean()
+  enabled!: boolean;
+
+  @ValidateIf(isEmailNotificationEnabled)
+  @IsNotEmpty()
+  @IsString()
+  @IsNotEmpty()
+  from!: string;
+
+  @IsString()
+  replyTo!: string;
+
+  @ValidateIf(isEmailNotificationEnabled)
+  @Type(() => SystemConfigSmtpTransportDto)
+  @ValidateNested()
+  @IsObject()
+  transport!: SystemConfigSmtpTransportDto;
+}
+
+class SystemConfigNotificationsDto {
+  @Type(() => SystemConfigSmtpDto)
+  @ValidateNested()
+  @IsObject()
+  smtp!: SystemConfigSmtpDto;
+}
+
 class SystemConfigStorageTemplateDto {
   @ValidateBoolean()
   enabled!: boolean;
@@ -385,18 +441,26 @@ export class SystemConfigThemeDto {
   customCss!: string;
 }
 
-class SystemConfigThumbnailDto {
-  @IsInt()
-  @Min(1)
-  @Type(() => Number)
-  @ApiProperty({ type: 'integer' })
-  webpSize!: number;
+class SystemConfigImageDto {
+  @IsEnum(ImageFormat)
+  @ApiProperty({ enumName: 'ImageFormat', enum: ImageFormat })
+  thumbnailFormat!: ImageFormat;
 
   @IsInt()
   @Min(1)
   @Type(() => Number)
   @ApiProperty({ type: 'integer' })
-  jpegSize!: number;
+  thumbnailSize!: number;
+
+  @IsEnum(ImageFormat)
+  @ApiProperty({ enumName: 'ImageFormat', enum: ImageFormat })
+  previewFormat!: ImageFormat;
+
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  @ApiProperty({ type: 'integer' })
+  previewSize!: number;
 
   @IsInt()
   @Min(1)
@@ -408,6 +472,9 @@ class SystemConfigThumbnailDto {
   @IsEnum(Colorspace)
   @ApiProperty({ enumName: 'Colorspace', enum: Colorspace })
   colorspace!: Colorspace;
+
+  @ValidateBoolean()
+  extractEmbedded!: boolean;
 }
 
 class SystemConfigTrashDto {
@@ -480,10 +547,10 @@ export class SystemConfigDto implements SystemConfig {
   @IsObject()
   job!: SystemConfigJobDto;
 
-  @Type(() => SystemConfigThumbnailDto)
+  @Type(() => SystemConfigImageDto)
   @ValidateNested()
   @IsObject()
-  thumbnail!: SystemConfigThumbnailDto;
+  image!: SystemConfigImageDto;
 
   @Type(() => SystemConfigTrashDto)
   @ValidateNested()
@@ -499,6 +566,11 @@ export class SystemConfigDto implements SystemConfig {
   @ValidateNested()
   @IsObject()
   library!: SystemConfigLibraryDto;
+
+  @Type(() => SystemConfigNotificationsDto)
+  @ValidateNested()
+  @IsObject()
+  notifications!: SystemConfigNotificationsDto;
 
   @Type(() => SystemConfigServerDto)
   @ValidateNested()

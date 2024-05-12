@@ -9,12 +9,12 @@
 </p>
 
 <p align="center">
-<img src="design/immich-logo-stacked-light.svg" width="300" title="Iniciar sessió amb URL personalitzada">
+<img src="../design/immich-logo-stacked-light.svg" width="300" title="Iniciar sessió amb URL personalitzada">
 </p>
 <h3 align="center">Immich - Solució de còpia de seguretat d'alta rendiment per a fotos i vídeos auto-allotjada</h3>
 <br/>
 <a href="https://immich.app">
-<img src="design/immich-screenshots.png" title="Captura de pantalla principal">
+<img src="../design/immich-screenshots.png" title="Captura de pantalla principal">
 </a>
 <br/>
 <p align="center">
@@ -28,6 +28,8 @@
   <a href="README_nl_NL.md">Nederlands</a>
   <a href="README_tr_TR.md">Türkçe</a>
   <a href="README_zh_CN.md">中文</a>
+  <a href="README_pt_BR.md">Português Brasileiro</a>
+  <a href="README_ar_JO.md">العربية</a>
 </p>
 
 ## Avís legal
@@ -45,7 +47,6 @@
 - [Introducció](https://immich.app/docs/overview/introduction)
 - [Instal·lació](https://immich.app/docs/install/requirements)
 - [Directrius de contribució](https://immich.app/docs/overview/support-the-project)
-- [Donar suport al projecte](#suportar-el-projecte)
 
 ## Documentació
 
@@ -95,20 +96,3 @@ Spec: Free-tier Oracle VM - Amsterdam - 2.4Ghz quad-core ARM64 CPU, 24GB RAM
 | Records (fa x anys)                           | Sí     | Sí  |
 | Suport fora de línia                          | Sí     | No  |
 | Galeria de només lectura                      | Sí     | Sí  |
-
-# Donar suport al projecte
-
-M'he compromès amb aquest projecte i no em detindré. Continuaré actualitzant la documentació, afegint noves funcionalitats i solucionant errors. Però no ho puc fer sol. Per això, necessito la vostra ajuda per donar-me motivació addicional per seguir endavant.
-
-Com van dir els nostres amfitrions a l'episodi [selfhosted.show - 'The-organization-must-not-be-name is a Hostile Actor'](https://selfhosted.show/79?t=1418), això és una tasca enorme del que l'equip i jo estem fent. I m'encantaria poder dedicar-m'hi a temps complet, per la qual cosa us demano la vostra ajuda per fer-ho possible.
-
-Si creieu que aquesta és una causa justa i l'aplicació és alguna cosa que us veieu utilitzant durant molt de temps, considereu donar suport al projecte amb alguna de les opcions següents.
-
-## Donació
-
-- [Donació mensual](https://github.com/sponsors/immich-app) a través de GitHub Sponsors
-- [Donació única](https://github.com/sponsors/immich-app?frequency=one-time&sponsor=alextran1502) a través de GitHub Sponsors
-- [Librepay](https://liberapay.com/alex.tran1502/)
-- [buymeacoffee](https://www.buymeacoffee.com/altran1502)
-- Bitcoin: 3QVAb9dCHutquVejeNXitPqZX26Yg5kxb7
-- ZCash: u1smm4wvqegcp46zss2jf5xptchgeczp4rx7a0wu3mermf2wxahm26yyz5w9mw3f2p4emwlljxjumg774kgs8rntt9yags0whnzane4n67z4c7gppq4yyvcj404ne3r769prwzd9j8ntvqp44fa6d67sf7rmcfjmds3gmeceff4u8e92rh38nd30cr96xw6vfhk6scu4ws90ldzupr3sz

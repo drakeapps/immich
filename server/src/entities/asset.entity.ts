@@ -67,10 +67,10 @@ export class AssetEntity {
   originalPath!: string;
 
   @Column({ type: 'varchar', nullable: true })
-  resizePath!: string | null;
+  previewPath!: string | null;
 
   @Column({ type: 'varchar', nullable: true, default: '' })
-  webpPath!: string | null;
+  thumbnailPath!: string | null;
 
   @Column({ type: 'bytea', nullable: true })
   thumbhash!: Buffer | null;
@@ -105,9 +105,6 @@ export class AssetEntity {
 
   @Column({ type: 'boolean', default: false })
   isExternal!: boolean;
-
-  @Column({ type: 'boolean', default: false })
-  isReadOnly!: boolean;
 
   @Column({ type: 'boolean', default: false })
   isOffline!: boolean;

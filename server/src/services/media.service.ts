@@ -1,5 +1,6 @@
 import { Inject, Injectable, UnsupportedMediaTypeException } from '@nestjs/common';
-import { StorageCore, StorageFolder } from 'src/cores/storage.core';
+import { dirname } from 'node:path';
+import { GeneratedImageType, StorageCore, StorageFolder } from 'src/cores/storage.core';
 import { SystemConfigCore } from 'src/cores/system-config.core';
 import { SystemConfigFFmpegDto } from 'src/dtos/system-config.dto';
 import { AssetEntity, AssetType } from 'src/entities/asset.entity';
@@ -7,6 +8,7 @@ import { AssetPathType } from 'src/entities/move.entity';
 import {
   AudioCodec,
   Colorspace,
+  ImageFormat,
   TranscodeHWAccel,
   TranscodePolicy,
   TranscodeTarget,
@@ -24,13 +26,14 @@ import {
   JobStatus,
   QueueName,
 } from 'src/interfaces/job.interface';
+import { ILoggerRepository } from 'src/interfaces/logger.interface';
 import { AudioStreamInfo, IMediaRepository, VideoCodecHWConfig, VideoStreamInfo } from 'src/interfaces/media.interface';
 import { IMoveRepository } from 'src/interfaces/move.interface';
 import { IPersonRepository } from 'src/interfaces/person.interface';
 import { IStorageRepository } from 'src/interfaces/storage.interface';
 import { ISystemConfigRepository } from 'src/interfaces/system-config.interface';
-import { ImmichLogger } from 'src/utils/logger';
 import {
+  AV1Config,
   H264Config,
   HEVCConfig,
   NVENCConfig,
@@ -40,14 +43,15 @@ import {
   VAAPIConfig,
   VP9Config,
 } from 'src/utils/media';
+import { mimeTypes } from 'src/utils/mime-types';
 import { usePagination } from 'src/utils/pagination';
 
 @Injectable()
 export class MediaService {
-  private logger = new ImmichLogger(MediaService.name);
   private configCore: SystemConfigCore;
   private storageCore: StorageCore;
-  private hasOpenCL?: boolean = undefined;
+  private openCL: boolean | null = null;
+  private devices: string[] | null = null;
 
   constructor(
     @Inject(IAssetRepository) private assetRepository: IAssetRepository,
@@ -58,22 +62,25 @@ export class MediaService {
     @Inject(ISystemConfigRepository) configRepository: ISystemConfigRepository,
     @Inject(IMoveRepository) moveRepository: IMoveRepository,
     @Inject(ICryptoRepository) cryptoRepository: ICryptoRepository,
+    @Inject(ILoggerRepository) private logger: ILoggerRepository,
   ) {
-    this.configCore = SystemConfigCore.create(configRepository);
+    this.logger.setContext(MediaService.name);
+    this.configCore = SystemConfigCore.create(configRepository, this.logger);
     this.storageCore = StorageCore.create(
       assetRepository,
+      cryptoRepository,
       moveRepository,
       personRepository,
-      cryptoRepository,
-      configRepository,
       storageRepository,
+      configRepository,
+      this.logger,
     );
   }
 
   async handleQueueGenerateThumbnails({ force }: IBaseJob): Promise<JobStatus> {
     const assetPagination = usePagination(JOBS_ASSET_PAGINATION_SIZE, (pagination) => {
       return force
-        ? this.assetRepository.getAll(pagination)
+        ? this.assetRepository.getAll(pagination, { isVisible: true })
         : this.assetRepository.getWithout(pagination, WithoutProperty.THUMBNAIL);
     });
 
@@ -81,15 +88,15 @@ export class MediaService {
       const jobs: JobItem[] = [];
 
       for (const asset of assets) {
-        if (!asset.resizePath || force) {
-          jobs.push({ name: JobName.GENERATE_JPEG_THUMBNAIL, data: { id: asset.id } });
+        if (!asset.previewPath || force) {
+          jobs.push({ name: JobName.GENERATE_PREVIEW, data: { id: asset.id } });
           continue;
         }
-        if (!asset.webpPath) {
-          jobs.push({ name: JobName.GENERATE_WEBP_THUMBNAIL, data: { id: asset.id } });
+        if (!asset.thumbnailPath) {
+          jobs.push({ name: JobName.GENERATE_THUMBNAIL, data: { id: asset.id } });
         }
         if (!asset.thumbhash) {
-          jobs.push({ name: JobName.GENERATE_THUMBHASH_THUMBNAIL, data: { id: asset.id } });
+          jobs.push({ name: JobName.GENERATE_THUMBHASH, data: { id: asset.id } });
         }
       }
 
@@ -109,7 +116,7 @@ export class MediaService {
             continue;
           }
 
-          await this.personRepository.update({ id: person.id, faceAssetId: face.assetId });
+          await this.personRepository.update({ id: person.id, faceAssetId: face.id });
         }
 
         jobs.push({ name: JobName.GENERATE_PERSON_THUMBNAIL, data: { id: person.id } });
@@ -152,41 +159,65 @@ export class MediaService {
   }
 
   async handleAssetMigration({ id }: IEntityJob): Promise<JobStatus> {
+    const { image } = await this.configCore.getConfig();
     const [asset] = await this.assetRepository.getByIds([id]);
     if (!asset) {
       return JobStatus.FAILED;
     }
 
-    await this.storageCore.moveAssetFile(asset, AssetPathType.JPEG_THUMBNAIL);
-    await this.storageCore.moveAssetFile(asset, AssetPathType.WEBP_THUMBNAIL);
-    await this.storageCore.moveAssetFile(asset, AssetPathType.ENCODED_VIDEO);
+    await this.storageCore.moveAssetImage(asset, AssetPathType.PREVIEW, image.previewFormat);
+    await this.storageCore.moveAssetImage(asset, AssetPathType.THUMBNAIL, image.thumbnailFormat);
+    await this.storageCore.moveAssetVideo(asset);
 
     return JobStatus.SUCCESS;
   }
 
-  async handleGenerateJpegThumbnail({ id }: IEntityJob): Promise<JobStatus> {
-    const [asset] = await this.assetRepository.getByIds([id], { exifInfo: true });
+  async handleGeneratePreview({ id }: IEntityJob): Promise<JobStatus> {
+    const [{ image }, [asset]] = await Promise.all([
+      this.configCore.getConfig(),
+      this.assetRepository.getByIds([id], { exifInfo: true }),
+    ]);
     if (!asset) {
       return JobStatus.FAILED;
     }
 
-    const resizePath = await this.generateThumbnail(asset, 'jpeg');
-    await this.assetRepository.update({ id: asset.id, resizePath });
+    if (!asset.isVisible) {
+      return JobStatus.SKIPPED;
+    }
+
+    const previewPath = await this.generateThumbnail(asset, AssetPathType.PREVIEW, image.previewFormat);
+    if (asset.previewPath && asset.previewPath !== previewPath) {
+      this.logger.debug(`Deleting old preview for asset ${asset.id}`);
+      await this.storageRepository.unlink(asset.previewPath);
+    }
+    await this.assetRepository.update({ id: asset.id, previewPath });
     return JobStatus.SUCCESS;
   }
 
-  private async generateThumbnail(asset: AssetEntity, format: 'jpeg' | 'webp') {
-    const { thumbnail, ffmpeg } = await this.configCore.getConfig();
-    const size = format === 'jpeg' ? thumbnail.jpegSize : thumbnail.webpSize;
-    const path =
-      format === 'jpeg' ? StorageCore.getLargeThumbnailPath(asset) : StorageCore.getSmallThumbnailPath(asset);
+  private async generateThumbnail(asset: AssetEntity, type: GeneratedImageType, format: ImageFormat) {
+    const { image, ffmpeg } = await this.configCore.getConfig();
+    const size = type === AssetPathType.PREVIEW ? image.previewSize : image.thumbnailSize;
+    const path = StorageCore.getImagePath(asset, type, format);
     this.storageCore.ensureFolders(path);
 
     switch (asset.type) {
       case AssetType.IMAGE: {
-        const colorspace = this.isSRGB(asset) ? Colorspace.SRGB : thumbnail.colorspace;
-        const thumbnailOptions = { format, size, colorspace, quality: thumbnail.quality };
-        await this.mediaRepository.resize(asset.originalPath, path, thumbnailOptions);
+        const shouldExtract = image.extractEmbedded && mimeTypes.isRaw(asset.originalPath);
+        const extractedPath = StorageCore.getTempPathInDir(dirname(path));
+        const didExtract = shouldExtract && (await this.mediaRepository.extract(asset.originalPath, extractedPath));
+
+        try {
+          const useExtracted = didExtract && (await this.shouldUseExtractedImage(extractedPath, image.previewSize));
+          const colorspace = this.isSRGB(asset) ? Colorspace.SRGB : image.colorspace;
+          const imageOptions = { format, size, colorspace, quality: image.quality };
+
+          const outputPath = useExtracted ? extractedPath : asset.originalPath;
+          await this.mediaRepository.generateThumbnail(outputPath, path, imageOptions);
+        } finally {
+          if (didExtract) {
+            await this.storageRepository.unlink(extractedPath);
+          }
+        }
         break;
       }
 
@@ -209,29 +240,48 @@ export class MediaService {
       }
     }
     this.logger.log(
-      `Successfully generated ${format.toUpperCase()} ${asset.type.toLowerCase()} thumbnail for asset ${asset.id}`,
+      `Successfully generated ${format.toUpperCase()} ${asset.type.toLowerCase()} ${type} for asset ${asset.id}`,
     );
     return path;
   }
 
-  async handleGenerateWebpThumbnail({ id }: IEntityJob): Promise<JobStatus> {
-    const [asset] = await this.assetRepository.getByIds([id], { exifInfo: true });
+  async handleGenerateThumbnail({ id }: IEntityJob): Promise<JobStatus> {
+    const [{ image }, [asset]] = await Promise.all([
+      this.configCore.getConfig(),
+      this.assetRepository.getByIds([id], { exifInfo: true }),
+    ]);
     if (!asset) {
       return JobStatus.FAILED;
     }
 
-    const webpPath = await this.generateThumbnail(asset, 'webp');
-    await this.assetRepository.update({ id: asset.id, webpPath });
+    if (!asset.isVisible) {
+      return JobStatus.SKIPPED;
+    }
+
+    const thumbnailPath = await this.generateThumbnail(asset, AssetPathType.THUMBNAIL, image.thumbnailFormat);
+    if (asset.thumbnailPath && asset.thumbnailPath !== thumbnailPath) {
+      this.logger.debug(`Deleting old thumbnail for asset ${asset.id}`);
+      await this.storageRepository.unlink(asset.thumbnailPath);
+    }
+    await this.assetRepository.update({ id: asset.id, thumbnailPath });
     return JobStatus.SUCCESS;
   }
 
-  async handleGenerateThumbhashThumbnail({ id }: IEntityJob): Promise<JobStatus> {
+  async handleGenerateThumbhash({ id }: IEntityJob): Promise<JobStatus> {
     const [asset] = await this.assetRepository.getByIds([id]);
-    if (!asset?.resizePath) {
+    if (!asset) {
       return JobStatus.FAILED;
     }
 
-    const thumbhash = await this.mediaRepository.generateThumbhash(asset.resizePath);
+    if (!asset.isVisible) {
+      return JobStatus.SKIPPED;
+    }
+
+    if (!asset.previewPath) {
+      return JobStatus.FAILED;
+    }
+
+    const thumbhash = await this.mediaRepository.generateThumbhash(asset.previewPath);
     await this.assetRepository.update({ id: asset.id, thumbhash });
 
     return JobStatus.SUCCESS;
@@ -432,6 +482,9 @@ export class MediaService {
       case VideoCodec.VP9: {
         return new VP9Config(config);
       }
+      case VideoCodec.AV1: {
+        return new AV1Config(config);
+      }
       default: {
         throw new UnsupportedMediaTypeException(`Codec '${config.targetVideoCodec}' is unsupported`);
       }
@@ -440,36 +493,21 @@ export class MediaService {
 
   private async getHWCodecConfig(config: SystemConfigFFmpegDto) {
     let handler: VideoCodecHWConfig;
-    let devices: string[];
     switch (config.accel) {
       case TranscodeHWAccel.NVENC: {
         handler = new NVENCConfig(config);
         break;
       }
       case TranscodeHWAccel.QSV: {
-        devices = await this.storageRepository.readdir('/dev/dri');
-        handler = new QSVConfig(config, devices);
+        handler = new QSVConfig(config, await this.getDevices());
         break;
       }
       case TranscodeHWAccel.VAAPI: {
-        devices = await this.storageRepository.readdir('/dev/dri');
-        handler = new VAAPIConfig(config, devices);
+        handler = new VAAPIConfig(config, await this.getDevices());
         break;
       }
       case TranscodeHWAccel.RKMPP: {
-        if (this.hasOpenCL === undefined) {
-          try {
-            const maliIcdStat = await this.storageRepository.stat('/etc/OpenCL/vendors/mali.icd');
-            const maliDeviceStat = await this.storageRepository.stat('/dev/mali0');
-            this.hasOpenCL = maliIcdStat.isFile() && maliDeviceStat.isCharacterDevice();
-          } catch {
-            this.logger.warn('OpenCL not available for transcoding, using CPU instead.');
-            this.hasOpenCL = false;
-          }
-        }
-
-        devices = await this.storageRepository.readdir('/dev/dri');
-        handler = new RKMPPConfig(config, devices, this.hasOpenCL);
+        handler = new RKMPPConfig(config, await this.getDevices(), await this.hasOpenCL());
         break;
       }
       default: {
@@ -498,7 +536,7 @@ export class MediaService {
     }
   }
 
-  parseBitrateToBps(bitrateString: string) {
+  private parseBitrateToBps(bitrateString: string) {
     const bitrateValue = Number.parseInt(bitrateString);
 
     if (Number.isNaN(bitrateValue)) {
@@ -512,5 +550,35 @@ export class MediaService {
     } else {
       return bitrateValue;
     }
+  }
+
+  private async shouldUseExtractedImage(extractedPath: string, targetSize: number) {
+    const { width, height } = await this.mediaRepository.getImageDimensions(extractedPath);
+    const extractedSize = Math.min(width, height);
+
+    return extractedSize >= targetSize;
+  }
+
+  private async getDevices() {
+    if (!this.devices) {
+      this.devices = await this.storageRepository.readdir('/dev/dri');
+    }
+
+    return this.devices;
+  }
+
+  private async hasOpenCL() {
+    if (this.openCL === null) {
+      try {
+        const maliIcdStat = await this.storageRepository.stat('/etc/OpenCL/vendors/mali.icd');
+        const maliDeviceStat = await this.storageRepository.stat('/dev/mali0');
+        this.openCL = maliIcdStat.isFile() && maliDeviceStat.isCharacterDevice();
+      } catch {
+        this.logger.warn('OpenCL not available for transcoding, using CPU instead.');
+        this.openCL = false;
+      }
+    }
+
+    return this.openCL;
   }
 }

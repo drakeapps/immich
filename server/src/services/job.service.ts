@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { snakeCase } from 'lodash';
 import { FeatureFlag, SystemConfigCore } from 'src/cores/system-config.core';
 import { mapAsset } from 'src/dtos/asset-response.dto';
 import { AllJobStatusResponseDto, JobCommandDto, JobStatusDto } from 'src/dtos/job.dto';
@@ -16,13 +17,13 @@ import {
   QueueCleanType,
   QueueName,
 } from 'src/interfaces/job.interface';
+import { ILoggerRepository } from 'src/interfaces/logger.interface';
+import { IMetricRepository } from 'src/interfaces/metric.interface';
 import { IPersonRepository } from 'src/interfaces/person.interface';
 import { ISystemConfigRepository } from 'src/interfaces/system-config.interface';
-import { ImmichLogger } from 'src/utils/logger';
 
 @Injectable()
 export class JobService {
-  private logger = new ImmichLogger(JobService.name);
   private configCore: SystemConfigCore;
 
   constructor(
@@ -31,8 +32,11 @@ export class JobService {
     @Inject(IJobRepository) private jobRepository: IJobRepository,
     @Inject(ISystemConfigRepository) configRepository: ISystemConfigRepository,
     @Inject(IPersonRepository) private personRepository: IPersonRepository,
+    @Inject(IMetricRepository) private metricRepository: IMetricRepository,
+    @Inject(ILoggerRepository) private logger: ILoggerRepository,
   ) {
-    this.configCore = SystemConfigCore.create(configRepository);
+    this.logger.setContext(JobService.name);
+    this.configCore = SystemConfigCore.create(configRepository, logger);
   }
 
   async handleCommand(queueName: QueueName, dto: JobCommandDto): Promise<JobStatusDto> {
@@ -91,6 +95,8 @@ export class JobService {
     if (isActive) {
       throw new BadRequestException(`Job is already running`);
     }
+
+    this.metricRepository.jobs.addToCounter(`immich.queues.${snakeCase(name)}.started`, 1);
 
     switch (name) {
       case QueueName.VIDEO_CONVERSION: {
@@ -156,14 +162,21 @@ export class JobService {
       this.jobRepository.addHandler(queueName, concurrency, async (item: JobItem): Promise<void> => {
         const { name, data } = item;
 
+        const queueMetric = `immich.queues.${snakeCase(queueName)}.active`;
+        this.metricRepository.jobs.addToGauge(queueMetric, 1);
+
         try {
           const handler = jobHandlers[name];
           const status = await handler(data);
+          const jobMetric = `immich.jobs.${name.replaceAll('-', '_')}.${status}`;
+          this.metricRepository.jobs.addToCounter(jobMetric, 1);
           if (status === JobStatus.SUCCESS || status == JobStatus.SKIPPED) {
             await this.onDone(item);
           }
         } catch (error: Error | any) {
           this.logger.error(`Unable to run job handler (${queueName}/${name}): ${error}`, error?.stack, data);
+        } finally {
+          this.metricRepository.jobs.addToGauge(queueMetric, -1);
         }
       });
     }
@@ -194,6 +207,7 @@ export class JobService {
       { name: JobName.CLEAN_OLD_AUDIT_LOGS },
       { name: JobName.USER_SYNC_USAGE },
       { name: JobName.QUEUE_FACIAL_RECOGNITION, data: { force: false } },
+      { name: JobName.CLEAN_OLD_SESSION_TOKENS },
     ]);
   }
 
@@ -233,7 +247,7 @@ export class JobService {
 
       case JobName.STORAGE_TEMPLATE_MIGRATION_SINGLE: {
         if (item.data.source === 'upload') {
-          await this.jobRepository.queue({ name: JobName.GENERATE_JPEG_THUMBNAIL, data: item.data });
+          await this.jobRepository.queue({ name: JobName.GENERATE_PREVIEW, data: item.data });
         }
         break;
       }
@@ -247,10 +261,10 @@ export class JobService {
         break;
       }
 
-      case JobName.GENERATE_JPEG_THUMBNAIL: {
+      case JobName.GENERATE_PREVIEW: {
         const jobs: JobItem[] = [
-          { name: JobName.GENERATE_WEBP_THUMBNAIL, data: item.data },
-          { name: JobName.GENERATE_THUMBHASH_THUMBNAIL, data: item.data },
+          { name: JobName.GENERATE_THUMBNAIL, data: item.data },
+          { name: JobName.GENERATE_THUMBHASH, data: item.data },
         ];
 
         if (item.data.source === 'upload') {
@@ -270,7 +284,7 @@ export class JobService {
         break;
       }
 
-      case JobName.GENERATE_WEBP_THUMBNAIL: {
+      case JobName.GENERATE_THUMBNAIL: {
         if (item.data.source !== 'upload') {
           break;
         }

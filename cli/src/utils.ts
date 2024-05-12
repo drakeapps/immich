@@ -1,9 +1,9 @@
 import { defaults, getMyUserInfo, isHttpError } from '@immich/sdk';
-import { glob } from 'glob';
+import { glob } from 'fast-glob';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import yaml from 'yaml';
 
 export interface BaseOptions {
@@ -15,21 +15,25 @@ export interface BaseOptions {
 export type AuthDto = { url: string; key: string };
 type OldAuthDto = { instanceUrl: string; apiKey: string };
 
-export const authenticate = async (options: BaseOptions): Promise<void> => {
+export const authenticate = async (options: BaseOptions): Promise<AuthDto> => {
   const { configDirectory: configDir, url, key } = options;
 
   // provided in command
   if (url && key) {
-    await connect(url, key);
-    return;
+    return connect(url, key);
   }
 
   // fallback to auth file
   const config = await readAuthFile(configDir);
-  await connect(config.url, config.key);
+  const auth = await connect(config.url, config.key);
+  if (auth.url !== config.url) {
+    await writeAuthFile(configDir, auth);
+  }
+
+  return auth;
 };
 
-export const connect = async (url: string, key: string): Promise<void> => {
+export const connect = async (url: string, key: string) => {
   const wellKnownUrl = new URL('.well-known/immich', url);
   try {
     const wellKnown = await fetch(wellKnownUrl).then((response) => response.json());
@@ -50,6 +54,8 @@ export const connect = async (url: string, key: string): Promise<void> => {
     logError(error, 'Failed to connect to server');
     process.exit(1);
   }
+
+  return { url, key };
 };
 
 export const logError = (error: unknown, message: string) => {
@@ -98,11 +104,11 @@ export interface CrawlOptions {
   pathsToCrawl: string[];
   recursive?: boolean;
   includeHidden?: boolean;
-  exclusionPatterns?: string[];
+  exclusionPattern?: string;
   extensions: string[];
 }
 export const crawl = async (options: CrawlOptions): Promise<string[]> => {
-  const { extensions: extensionsWithPeriod, recursive, pathsToCrawl, exclusionPatterns, includeHidden } = options;
+  const { extensions: extensionsWithPeriod, recursive, pathsToCrawl, exclusionPattern, includeHidden } = options;
   const extensions = extensionsWithPeriod.map((extension) => extension.replace('.', ''));
 
   if (pathsToCrawl.length === 0) {
@@ -114,11 +120,12 @@ export const crawl = async (options: CrawlOptions): Promise<string[]> => {
 
   for await (const currentPath of pathsToCrawl) {
     try {
-      const stats = await stat(currentPath);
+      const absolutePath = resolve(currentPath);
+      const stats = await stat(absolutePath);
       if (stats.isFile() || stats.isSymbolicLink()) {
-        crawledFiles.push(currentPath);
+        crawledFiles.push(absolutePath);
       } else {
-        patterns.push(currentPath);
+        patterns.push(absolutePath);
       }
     } catch (error: any) {
       if (error.code === 'ENOENT') {
@@ -146,13 +153,13 @@ export const crawl = async (options: CrawlOptions): Promise<string[]> => {
 
   const globbedFiles = await glob(searchPattern, {
     absolute: true,
-    nocase: true,
-    nodir: true,
+    caseSensitiveMatch: false,
+    onlyFiles: true,
     dot: includeHidden,
-    ignore: exclusionPatterns,
+    ignore: [`**/${exclusionPattern}`],
   });
-
-  return [...crawledFiles, ...globbedFiles].sort();
+  globbedFiles.push(...crawledFiles);
+  return globbedFiles.sort();
 };
 
 export const sha1 = (filepath: string) => {

@@ -10,6 +10,7 @@ import {
   linkOAuthAccount,
   startOAuth,
   unlinkOAuthAccount,
+  type SharedLinkResponseDto,
   type UserResponseDto,
 } from '@immich/sdk';
 import { mdiCogRefreshOutline, mdiDatabaseRefreshOutline, mdiImageRefreshOutline } from '@mdi/js';
@@ -123,20 +124,19 @@ export const getJobName = (jobName: JobName) => {
     [JobName.BackgroundTask]: 'Background Tasks',
     [JobName.Search]: 'Search',
     [JobName.Library]: 'Library',
+    [JobName.Notifications]: 'Notifications',
   };
 
   return names[jobName];
 };
 
 let _key: string | undefined;
+let _sharedLink: SharedLinkResponseDto | undefined;
 
-export const setKey = (key: string) => {
-  _key = key;
-};
-
-export const getKey = (): string | undefined => {
-  return _key;
-};
+export const setKey = (key: string) => (_key = key);
+export const getKey = (): string | undefined => _key;
+export const setSharedLink = (sharedLink: SharedLinkResponseDto) => (_sharedLink = sharedLink);
+export const getSharedLink = (): SharedLinkResponseDto | undefined => _sharedLink;
 
 export const isSharedLink = () => {
   return !!_key;
@@ -277,3 +277,5 @@ export const asyncTimeout = (ms: number) => {
 export const handlePromiseError = <T>(promise: Promise<T>): void => {
   promise.catch((error) => console.error(`[utils.ts]:handlePromiseError ${error}`, error));
 };
+
+export const memoryLaneTitle = (yearsAgo: number) => `${yearsAgo} ${yearsAgo ? 'years' : 'year'} ago`;
